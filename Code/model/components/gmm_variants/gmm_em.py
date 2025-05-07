@@ -1,6 +1,6 @@
 import numpy as np
 
-import stat_lib as slib
+import model.components.stat_lib as slib
 
 
 class GMMEM:

@@ -1,12 +1,15 @@
-import param_init as pini
-import stat_lib as slib
+import model.components.stat_lib as slib
+import model.components.param_init as pini
+
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 
 
-class GMMEstimationNetRaw:
-    def __init__(self, config):
+class GMMEstimationNetRaw(nn.Module):
+    def __init__(self, config, device):
+        super(GMMEstimationNetRaw,self).__init__()
         # DMM config
         self.dmm_config = config
         self.num_mixture = self.dmm_config[0][0]
@@ -15,8 +18,8 @@ class GMMEstimationNetRaw:
         self.wi = []
         self.bi = []
         for i in range(1, len(self.dmm_config) - 1):
-            w = pini.weight_variable([self.dmm_config[i], self.dmm_config[i+1]])
-            b = pini.bias_variable([self.dmm_config[i+1]])
+            w = pini.weight_variable([self.dmm_config[i], self.dmm_config[i+1]], device)
+            b = pini.bias_variable([self.dmm_config[i+1]], device)
             self.wi.append(w)
             self.bi.append(b)
         # Mixture modeling

@@ -1,11 +1,12 @@
 import torch
 import torch.nn.functional as F
 
-import param_init as pini
+import model.components.param_init as pini
 
 
-class PretrainAutoencoder:
-    def __init__(self, config, num_drop_out):
+class PretrainAutoencoder(torch.nn.Module):
+    def __init__(self, config, num_drop_out, device):
+        super(PretrainAutoencoder,self).__init__()
         self.num_dim = config
         self.code_layer = len(config)
         self.num_dropout_layer = num_drop_out
@@ -14,15 +15,15 @@ class PretrainAutoencoder:
         self.bi = []
         # Encode
         for i in range(0, len(self.num_dim)-1):
-            w = pini.weight_variable([self.num_dim[i], self.num_dim[i+1]])
-            b = pini.bias_variable([self.num_dim[i+1]])
+            w = pini.weight_variable([self.num_dim[i], self.num_dim[i+1]], device)
+            b = pini.bias_variable([self.num_dim[i+1]], device)
             self.wi.append(w)
             self.bi.append(b)
         # Decode
         for i in range(1, len(self.num_dim)):
             j = len(self.num_dim)-i
-            w = pini.weight_variable([self.num_dim[j], self.num_dim[j-1]])
-            b = pini.bias_variable([self.num_dim[j-1]])
+            w = pini.weight_variable([self.num_dim[j], self.num_dim[j-1]], device)
+            b = pini.bias_variable([self.num_dim[j-1]], device)
             self.wi.append(w)
             self.bi.append(b)
 
