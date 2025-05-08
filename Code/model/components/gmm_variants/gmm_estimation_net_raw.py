@@ -37,18 +37,11 @@ class GMMEstimationNetRaw(nn.Module):
             if i < len(self.wi) - 1:
                 zj = F.tanh(torch.matmul(zi, self.wi[i]) + self.bi[i]) # tanh, softsign, sigmoid, softplus
             else:
-                zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i])
+                zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i],dim=1)
                 # f = torch.matmul(zi, self.wi[i]) + self.bi[i]
             z.append(zj)
         
-        '''
-        print'z'
-        print len(z)
-        print'self.wi'
-        print(len(self.wi))
-        print'self.gmm_layer'
-        print(self.gmm_layer)
-        '''
+
         p = z[len(z)-1]
         f = z[self.gmm_layer-1] # the representation after 'softmax'
         #f = x # the output of AE
@@ -79,7 +72,7 @@ class GMMEstimationNetRaw(nn.Module):
             if i < len(self.wi) - 1:
                 zj = F.tanh(torch.matmul(zi, self.wi[i]) + self.bi[i])
             else:
-                zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i])
+                zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i],dim=1)
             z.append(zj)
         p = z[len(z) - 1]
         f = z[self.gmm_layer - 1]
@@ -95,7 +88,7 @@ class GMMEstimationNetRaw(nn.Module):
             if i < len(self.wi) - 1:
                 zj = F.tanh(torch.matmul(zi, self.wi[i]) + self.bi[i])
             else:
-                zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i])
+                zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i],dim=1)
             z.append(zj)
         f = z[self.gmm_layer - 1]
         likelihood = self.gmm.test(f, phi, mixture_mean, mixture_dev, mixture_cov)

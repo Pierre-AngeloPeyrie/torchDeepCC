@@ -29,7 +29,7 @@ if __name__ == '__main__':
     print(f"Device : {dev}")
     device = torch.device(dev)  
     
-    filename   = './Data/Yale_32x32.mat'
+    filename   = './Data/WebKB_texas.mat'
 
     #load data
     data_file = sio.loadmat(filename)
@@ -50,12 +50,12 @@ if __name__ == '__main__':
     accuracy     = []
     NMI          = []
 
-    epochs = 3000
-    epochs_pretrain = 1000
+    epochs = 100
+    epochs_pretrain = 100
 
     machine = PaeGmm(num_clus_r, num_clus_c, ae_config, ae_col_config, gmm_config, 0, device).to(device)
 
     acc, nmi = machine.run(input_data, ground_truth, epochs, epochs_pretrain)
 
-    print(f"Acc : {acc}")
-    print(f"NMI : {nmi}")
+    print(f"Acc : {acc[-1]}")
+    print(f"NMI : {nmi[-1]}")

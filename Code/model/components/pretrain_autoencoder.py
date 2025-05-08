@@ -32,7 +32,7 @@ class PretrainAutoencoder(torch.nn.Module):
         error = []
         var_list = []
         reg = []
-        l2_reg = 0
+        l2_reg = torch.tensor(0)
 
         # Encode
         zi = x
@@ -51,8 +51,8 @@ class PretrainAutoencoder(torch.nn.Module):
             error_l = torch.mean(torch.linalg.norm(zi - z_r, ord = 2, dim=1, keepdims=True))
             error.append(error_l * vision_coef)
             zi = zj
-            reg.append(torch.square(self.wi[i])/2 + torch.square(self.wi[ni])/2)
-            l2_reg = l2_reg + torch.square(self.wi[i])/2
+            reg.append(self.wi[i].square().sum()/2 + self.wi[ni].square().sum()/2)
+            l2_reg = l2_reg + self.wi[i].square().sum()/2
             var_list.append([self.wi[i], self.bi[i], self.wi[ni], self.bi[ni]])
         zc = zi
         
@@ -64,27 +64,17 @@ class PretrainAutoencoder(torch.nn.Module):
                     zj = F.dropout(zj, p = 1 - (keep_prob))
             else:
                 zj = torch.matmul(zi, self.wi[i]) + self.bi[i]
-            l2_reg = l2_reg + torch.square(self.wi[i])/2
+            l2_reg = l2_reg + self.wi[i].square().sum()/2
             zi = zj
         zo = zi
 
         # Cosine similarity
-        normalize_x = F.normalize(x, dim=1)
-        normalize_zo = F.normalize(zo, dim=1)
-        cos_sim = torch.sum(torch.multiply(normalize_x, normalize_zo), 1, keepdims=True)
         loss = torch.linalg.norm(x - zo, ord=2, dim=1, keepdims=True)
-        dist = torch.linalg.norm(x - zo, ord=2, dim=1, keepdims=True)
-        relative_dist = dist / torch.linalg.norm(x, ord=2, dim=1, keepdims=True)
-        # self.dist_min = torch.min(dist)
-        # self.dist_max = torch.max(dist)
-        # dist_norm = (dist - self.dist_min) / (self.dist_max - self.dist_min + 1e-12)
         
         xo = torch.concat([zc], 1)
-        
-        error_all = torch.mean(loss)
-        error.append(error_all)
-        # var_list.append([self.w6, self.b6, self.w9, self.b9])
-        # error = error_all + error_1 + error_2 + error_3 + error_4 + error_5 + error_6 + error_7
+
+        error.append(torch.mean(loss))
+
         return xo, error, var_list, l2_reg, reg
 
     def test(self, x):
@@ -140,8 +130,8 @@ class PretrainAutoencoder(torch.nn.Module):
             error_l = torch.mean(torch.linalg.norm(zi - z_r, ord=2, dim=1, keepdims=True))
             error.append(error_l * vision_coef)
             zi = zj
-            reg.append(torch.square(self.wi[i])/2 + torch.square(self.wi[ni])/2)
-            l2_reg = l2_reg + torch.square(self.wi[i])/2
+            reg.append(self.wi[i].square().sum()/2 + self.wi[ni].square().sum()/2)
+            l2_reg = l2_reg + self.wi[i].square().sum()/2
             var_list.append([self.wi[i], self.bi[i], self.wi[ni], self.bi[ni]])
         zc = zi
         # Decode
@@ -152,7 +142,7 @@ class PretrainAutoencoder(torch.nn.Module):
                     zj = F.dropout(zj, p=1 - (keep_prob))
             else:
                 zj = torch.matmul(zi, self.wi[i]) + self.bi[i]
-            l2_reg = l2_reg + torch.square(self.wi[i])/2
+            l2_reg = l2_reg + self.wi[i].square().sum()/2
             zi = zj
         zo = zi
 

@@ -5,8 +5,12 @@ from sklearn.metrics.cluster import normalized_mutual_info_score
 from sklearn.cluster import KMeans
 import scipy.io as sio
 
+
 import model.components.gmm_variants.gmm_estimation_net_raw as dgmmb_multi
 import model.components.pretrain_autoencoder as ae
+
+torch.autograd.set_detect_anomaly(True)
+
 
 def get_key(item):
     return item[0]
@@ -18,6 +22,8 @@ class PaeGmm(torch.nn.Module):
         self.autoencoder_col = ae.PretrainAutoencoder(ae_col_config, num_dropout, device)
         self.e_net = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
         self.e_net_col = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
+        self.gmm_optimizer = torch.optim.Adam(self.e_net.wi + self.e_net.bi + self.e_net_col.wi + self.e_net_col.bi,1e-4)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.gmm_optimizer,1500,0.1)
         self.device = device
 
         self.nclu_row = nclu_row # the cluster num of rows
@@ -108,7 +114,7 @@ class PaeGmm(torch.nn.Module):
         nx, ny = T.shape
         T_xy = torch.matmul(torch.reshape(P_x, (nx,1)), torch.reshape(P_y, (1, ny)))
 
-        MI_temp =torch.log((T+0.1**15)/(T_xy+0.1**15)) /torch.log(torch.Tensor(2, dtype=torch.float32))
+        MI_temp =torch.log((T+0.1**15)/(T_xy+0.1**15)) /torch.log(torch.Tensor([2]).to(self.device))
         MI_T = torch.sum(torch.multiply(T, MI_temp))
 
         return MI_T
@@ -119,19 +125,18 @@ class PaeGmm(torch.nn.Module):
         # Uc: the cluster assignment matrix for cols, N_att * N_Col_clus
         # return the loss of mutual information between the original data matrix and the reduced data matrix
 
-        N_ins, N_Row_clus = Ur.get_shape().as_list()
-        N_att, N_Col_clus = Uc.get_shape().as_list()
+        N_ins, N_Row_clus = Ur.shape
+        N_att, N_Col_clus = Uc.shape
         #T_pro_org = torch.zeros((N_ins, N_att))) # original table for the joint probability
         #T_pro_red = torch.zeros((N_Row_clus, N_Col_clus))) # reduced table for the joint probability
+        Ur_max = torch.reshape(torch.max(Ur, dim=1).values, (N_ins, 1)) # the max value for each row; column vector
+        Uc_max = torch.reshape(torch.max(Uc, dim=1).values, (N_att, 1))
 
-        Ur_max = torch.reshape(torch.max(Ur, 1), (N_ins, 1)) # the max value for each row; column vector
-        Uc_max = torch.reshape(torch.max(Uc, 1), (N_att, 1))
+        Ur_max_idx = torch.argmax(Ur, dim=1) # the index of max value for rows, vector in row
+        Uc_max_idx = torch.argmax(Uc, dim=1)
 
-        Ur_max_idx = torch.argmax(Ur, 1) # the index of max value for rows, vector in row
-        Uc_max_idx = torch.argmax(Uc, 1)
-
-        # T_pro_org = torch.matmul(Ur_max, torch.transpose(Uc_max)) # original table for the joint probability
-        T_pro_org = torch.matmul(Ur, torch.transpose(Uc)) # original table for the joint probability
+        # T_pro_org = torch.matmul(Ur_max, Uc.T) # original table for the joint probability
+        T_pro_org = torch.matmul(Ur, Uc.T) # original table for the joint probability
         T_pro_org = T_pro_org / torch.sum(T_pro_org) # normalization: make sum equal 1
 
         T_pro_red = self.Reduce_Table(T_pro_org, Ur_max_idx, Uc_max_idx) # reduced table
@@ -175,79 +180,6 @@ class PaeGmm(torch.nn.Module):
         train_x_v = torch.from_numpy(self.gaussian_normalization(train_x)).to(torch.float32).to(self.device)
         train_x_v_col = torch.from_numpy(self.gaussian_normalization(train_x_col)).to(torch.float32).to(self.device)
         keep_prob = 1.0 
-        
-        # Autoencoder
-        train_z, train_error, train_var_list, train_l2_reg, train_reg = self.autoencoder.run(train_x_v, keep_prob)
-        train_z_col, train_error_col, train_var_list_col, train_l2_reg_col, train_reg_col = self.autoencoder_col.run(train_x_v_col, keep_prob)
-
-        '''
-        z_b, error_b, var_list_b, l2_reg_b, reg_b = self.autoencoder.run(x_b, keep_prob)
-        train_z, train_error, train_var_list, train_l2_reg, train_reg = self.autoencoder.run(train_x_v, keep_prob)
-        '''
-
-        # Pretraining
-        pretrain_step = []
-        pretrain_obj = []
-        for i in range(len(train_var_list)):
-            obj_oa_pretrain = train_error[i] * 5e0 + train_reg[i] * 1e0
-            train_step_i = tf.compat.v1.train.AdamOptimizer(1e-4).minimize(obj_oa_pretrain, var_list=train_var_list[i])
-            pretrain_step.append(train_step_i)
-            pretrain_obj.append(obj_oa_pretrain)
-
-        pretrain_col_step = []
-        pretrain_col_obj = []
-        for i in range(len(train_var_list_col)):
-            obj_oa_col_pretrain = train_error_col[i] * 5e0 + train_reg_col[i] * 1e0
-            train_col_step_i = tf.compat.v1.train.AdamOptimizer(1e-4).minimize(obj_oa_col_pretrain, var_list=train_var_list_col[i])
-            pretrain_col_step.append(train_col_step_i)
-            pretrain_col_obj.append(obj_oa_col_pretrain)
-
-        # Joint fine training
-        error_oa = 0
-        for error_k in train_error:
-            error_oa = error_oa + error_k
-        # error_oa = train_error[len(train_error) - 1]
-        # reconstruction_error = train_error[len(train_error) - 1]
-
-        error_oa_col = 0
-        for error_col_k in train_error_col:
-            error_oa_col = error_oa_col + error_col_k
-
-        # GMM Membership estimation
-        # loss, pen_dev, likelihood = self.e_net.run(train_z, keep_prob)
-        loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net.run(train_z, keep_prob)
-
-        loss_col, pen_dev_col, likelihood_col, p_z_col, x_t_col, p_t_col, z_p_col, z_t_col, mixture_mean_col, mixture_dev_col, mixture_cov_col, mixture_dev_det_col = self.e_net_col.run(train_z_col, keep_prob)
-
-        # Train step
-
-        # Para set for Softmax(h) (h is last representation) and Softmax(h)
-        # obj_oa = error_oa * 1e1 + train_l2_reg * 1e-2 + loss * 1e1 + pen_dev * 1e-2
-        # obj_oa_row = error_oa * 1e0 + train_l2_reg * 5e-1 + loss * 5e0 + pen_dev * 1e1
-
-        # Para set for h (last representation) and Softmax(h)
-        # obj_oa_row =     error_oa * 5e1 +     train_l2_reg * 1e1 +     loss * 5e0 +     pen_dev * 5e1
-
-        obj_oa_row =     error_oa * 2e-2  +     train_l2_reg * 2e-2 +     loss * 1e-1 +     pen_dev
-        obj_oa_col = error_oa_col * 2e-2  + train_l2_reg_col * 2e-2 + loss_col * 1e-1 + pen_dev_col
-        obj_cross  = self.MI_loss(p_z, p_z_col)
-        obj_oa     = obj_oa_row + obj_oa_col + obj_cross * 1e5
-
-        # train_step = tf.train.AdamOptimizer(1e-4).minimize(obj_oa)
-
-        train_step_1 = tf.compat.v1.train.AdamOptimizer(1e-4).minimize(obj_oa)
-        train_step_2 = tf.compat.v1.train.AdamOptimizer(1e-5).minimize(obj_oa)
-        # train_step_3 = tf.train.AdamOptimizer(1e-5).minimize(obj_oa)
-        
-        # GMM training
-        # obj_gmm = loss + pen_dev * 0.05
-
-        # train_step_gmm = tf.train.AdamOptimizer(1e-4).minimize(obj_gmm_b, var_list=self.e_net.var_list)
-
-        init = tf.compat.v1.global_variables_initializer()
-        sess.run(init)
-        coord = tf.train.Coordinator()
-        threads = tf.compat.v1.train.start_queue_runners(sess=sess, coord=coord)
 
         RR_obj_oa = []
         RR_obj_oa_row = []
@@ -277,208 +209,84 @@ class PaeGmm(torch.nn.Module):
 
         pred_label_list = []
         pred_label_col_list = []
+        
+        for i in range(pretrain_epochs) :
+            self.train()
+            # Autoencoder
+            train_z, train_error, train_var_list, train_l2_reg, train_reg = self.autoencoder.run(train_x_v, keep_prob)
+            train_z_col, train_error_col, train_var_list_col, train_l2_reg_col, train_reg_col = self.autoencoder_col.run(train_x_v_col, keep_prob)
 
-        dropout = 1.0
-        dropout_pretrain = 1.0
-
-        # pretrain for AE of row
-        epoch_tot = train_epochs
-        # num_step = num_train_points / batch_size + 1
-        for k in range(len(pretrain_step)):
-            train_step_pre_k = pretrain_step[k]
-            obj_k = pretrain_obj[k]
-            for i in range(pretrain_epochs): # epoch_tot
-                train_step_pre_k.run(feed_dict={keep_prob: dropout_pretrain, train_x_v: train_norm_x})
-                if (i + 1) % 1 == 0:
-                    train_obj = obj_k.eval(feed_dict={keep_prob: dropout_pretrain, train_x_v: train_norm_x})
-                    print("Pre-training row %g Epoch %d: error %g" % (k, i + 1, train_obj))
-
-        # pretrain for AE of col
-        epoch_tot_col = train_epochs
-        for k in range(len(pretrain_col_step)):
-            train_step_pre_col_k = pretrain_col_step[k]
-            obj_col_k = pretrain_col_obj[k]
-            for i in range(pretrain_epochs):  # epoch_tot_col
-                train_step_pre_col_k.run(feed_dict={keep_prob: dropout_pretrain, train_x_v_col: train_norm_x_col})
-                if (i + 1) % 1 == 0:
-                    train_col_obj = obj_col_k.eval(feed_dict={keep_prob: dropout_pretrain, train_x_v_col: train_norm_x_col})
-                    print("Pre-training col %g Epoch %d: error %g" % (k, i + 1, train_col_obj))
-
-        for k in range(epoch_tot):
-
-            # elif k < 20000:
-            #     train_step_1.run(feed_dict={keep_prob: 0.5})
-            # else:
-            #     train_step_2.run(feed_dict={keep_prob: 0.5})
-            '''
-            if (k+1) % 10 == 0:
-                train_obj = obj_oa.eval(feed_dict={keep_prob: 1.0, train_x_v: train_norm_x})
-                train_err = reconstruction_error.eval(feed_dict={keep_prob: 1.0, train_x_v: train_norm_x})
-                print("Epoch %d: objective %g; error %g" % (k + 1, train_obj, train_err))
-            '''
-
-            # train_step.run(feed_dict={keep_prob: 1.0, train_x_v: train_norm_x, train_x_v_col: train_norm_x_col})
-
-            if k < 1500:
-                train_step_1.run(feed_dict={keep_prob: dropout, train_x_v: train_norm_x, train_x_v_col: train_norm_x_col})
-            if k >= 1500:
-                train_step_2.run(feed_dict={keep_prob: dropout, train_x_v: train_norm_x, train_x_v_col: train_norm_x_col})
-	    
-            fetch = {'obj_oa':obj_oa, \
-                        'obj_oa_row':obj_oa_row, 'obj_oa_col':obj_oa_col, 'obj_cross':obj_cross, \
-                        'error_oa':error_oa, 'train_l2_reg':train_l2_reg, 'loss':loss, 'pen_dev':pen_dev, \
-                        'error_oa_col':error_oa_col, 'train_l2_reg_col':train_l2_reg_col, 'loss_col':loss_col, 'pen_dev_col':pen_dev_col, \
-                        'train_z':train_z, 'p_z':p_z, 'train_z_col':train_z_col, 'p_z_col':p_z_col,\
-                        'mixture_dev':mixture_dev, 'mixture_cov':mixture_cov, 'mixture_dev_det':mixture_dev_det, \
-                        'mixture_dev_col':mixture_dev_col, 'mixture_cov_col':mixture_cov_col, 'mixture_dev_det_col':mixture_dev_det_col, \
-                        'x_t':x_t, 'p_t':p_t, 'z_p':z_p, 'z_t':z_t, \
-                        'x_t_col':x_t_col, 'p_t_col':p_t_col, 'z_p_col':z_p_col, 'z_t_col':z_t_col, \
-'MI_org':self.MI_org, 'MI_red':self.MI_red, 'Ur_max_idx':self.Ur_max_idx, 'Uc_max_idx':self.Uc_max_idx}
+        
+            # Pretraining
             
-            RR = sess.run(fetch,feed_dict={keep_prob: dropout, train_x_v: train_norm_x, train_x_v_col: train_norm_x_col})
+            for i in range(len(train_var_list)):
+                obj_oa_pretrain = train_error[i] * 5e0 + train_reg[i] * 1e0
+                train_step_i = torch.optim.Adam(train_var_list[i],1e-4)
+                train_step_i.zero_grad()
+                obj_oa_pretrain.requires_grad = True
+                obj_oa_pretrain.backward()
+                train_step_i.step()
 
-            '''
-            print 'AE output'
-            print(RR['train_z'])
-            '''
-            # print 'p_z '
-            # print(RR['p_z'])
-            '''
-            print 'x_t'
-            print(x_t)
-            print(RR['x_t'][:,0,:])
-            print 'p_t'
-            print(p_t)
-            print 'z_p'
-            print(z_p)
-            print 'z_t'
-            print(z_t)
 
-            print'********'
+            for i in range(len(train_var_list_col)):
+                obj_oa_col_pretrain = train_error_col[i] * 5e0 + train_reg_col[i] * 1e0
+                train_col_step_i = torch.optim.Adam(train_var_list_col[i],1e-4)
+                train_col_step_i.zero_grad()
+                obj_oa_col_pretrain.requires_grad = True
+                obj_oa_col_pretrain.backward()
+                train_col_step_i.step()
 
-            print 'mixture_mean'
-            print(mixture_mean)
-            print 'mixture_cov'
-            print(RR['mixture_cov'].shape)
-            print 'mixture_dev'
-            print(RR['mixture_dev'].shape)
-            print 'mixture_dev_det'
-            print(RR['mixture_dev_det'].shape)
-            '''
+            # Joint fine training
+            error_oa = 0
+            for error_k in train_error:
+                error_oa = error_oa + error_k
+            # error_oa = train_error[len(train_error) - 1]
+            # reconstruction_error = train_error[len(train_error) - 1]
 
-            # print 'inverse of cov'
-            # print (np.linalg.inv(RR['mixture_cov']))
+            error_oa_col = 0
+            for error_col_k in train_error_col:
+                error_oa_col = error_oa_col + error_col_k
 
-            # total
-            print("Epoch %d: obj_oa %g; obj_row %g; obj_col %g; obj_cross %g;"
-                  % (k + 1, RR['obj_oa'], RR['obj_oa_row'], RR['obj_oa_col'], RR['obj_cross']))
+        # GMM Membership estimation
+        for i in range(train_epochs):
+            self.train
 
-            # row
-            print("Epoch %d: obj_row %g; error_oa %g; train_l2_reg %g; loss %g; pen_dev %g;"
-                  % (k + 1, RR['obj_oa_row'], RR['error_oa'], RR['train_l2_reg'], RR['loss'], RR['pen_dev']))
-            # col
-            print("Epoch %d: obj_col %g; error_oa_col %g; train_l2_reg_col %g; loss_col %g; pen_dev_col %g;"
-                  % (k + 1, RR['obj_oa_col'], RR['error_oa_col'], RR['train_l2_reg_col'], RR['loss_col'], RR['pen_dev_col']))
+            loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net.run(train_z, keep_prob)
 
-            # print('MI_org:' + str(RR['MI_org']) + 'MI_red' + str(RR['MI_red']))
+            loss_col, pen_dev_col, likelihood_col, p_z_col, x_t_col, p_t_col, z_p_col, z_t_col, mixture_mean_col, mixture_dev_col, mixture_cov_col, mixture_dev_det_col = self.e_net_col.run(train_z_col, keep_prob)
 
-            # print('Ur_max_idx')
-            # print(set(RR['Ur_max_idx'].tolist()))
-            # print('Uc_max_idx')
-            # print(set(RR['Uc_max_idx'].tolist()))
+            # Train step
+
+            # Para set for Softmax(h) (h is last representation) and Softmax(h)
+            # obj_oa = error_oa * 1e1 + train_l2_reg * 1e-2 + loss * 1e1 + pen_dev * 1e-2
+            # obj_oa_row = error_oa * 1e0 + train_l2_reg * 5e-1 + loss * 5e0 + pen_dev * 1e1
+
+            # Para set for h (last representation) and Softmax(h)
+            # obj_oa_row =     error_oa * 5e1 +     train_l2_reg * 1e1 +     loss * 5e0 +     pen_dev * 5e1
+
+            obj_oa_row =     error_oa * 2e-2  +     train_l2_reg * 2e-2 +     loss * 1e-1 +     pen_dev
+            obj_oa_col = error_oa_col * 2e-2  + train_l2_reg_col * 2e-2 + loss_col * 1e-1 + pen_dev_col
+            obj_cross  = self.MI_loss(p_z, p_z_col)
+            obj_oa     = obj_oa_row + obj_oa_col + obj_cross * 1e5
+
+            self.gmm_optimizer.zero_grad()
+            obj_oa.requires_grad = True
+            obj_oa.backward()
+            self.gmm_optimizer.step()
+
+            self.scheduler.step()
 
             # calculate accuracy and NMI
-            pred_label = np.argmax(RR['p_z'], 1) # vertor in row
-            pred_label_col = np.argmax(RR['p_z_col'], 1)
-
-            set_pre = set(pred_label.tolist())
-            set_pre_col = set(pred_label_col.tolist())
-
-            # print 'Predicted label set'
-            # print set_pre
+            pred_label = np.argmax(p_z.cpu(), 1) # vertor in row
+            pred_label_col = np.argmax(p_z_col.cpu(), 1)
 
             true_label = train_y # numpy
             acc, NMI = self.eval(true_label, pred_label)
-            print('acc:' + str(acc) + ',' + 'NMI:' + str(NMI))
-
-            # Kmeans on AE's output
-            pred_label_kmeans = KMeans(n_clusters=self.nclu_row, random_state=0).fit(RR['train_z']).labels_
-            set_pre_kmeans = set(pred_label_kmeans.tolist())
-            true_label_kmeans = train_y
-            acc_kmeans, NMI_kmeans = self.eval(true_label_kmeans, pred_label_kmeans)
- 
-
-            print('')
-
-            RR_obj_oa = np.append(RR_obj_oa, RR['obj_oa'])
-            RR_obj_oa_row = np.append(RR_obj_oa_row, RR['obj_oa_row'])
-            RR_obj_oa_col = np.append(RR_obj_oa_col, RR['obj_oa_col'])
-            RR_obj_cross = np.append(RR_obj_cross, RR['obj_cross'])
-
-            RR_error_oa = np.append(RR_error_oa, RR['error_oa'])
-            RR_train_l2_reg = np.append(RR_train_l2_reg, RR['train_l2_reg'])
-            RR_loss = np.append(RR_loss, RR['loss'])
-            RR_pen_dev = np.append(RR_pen_dev, RR['pen_dev'])
-
-            RR_error_oa_col = np.append(RR_error_oa_col, RR['error_oa_col'])
-            RR_train_l2_reg_col = np.append(RR_train_l2_reg_col, RR['train_l2_reg_col'])
-            RR_loss_col = np.append(RR_loss_col, RR['loss_col'])
-            RR_pen_dev_col = np.append(RR_pen_dev_col, RR['pen_dev_col'])        
-
-            RR_MI_org = np.append(RR_MI_org, RR['MI_org'])
-            RR_MI_red = np.append(RR_MI_red, RR['MI_red'])
+            #print('acc:' + str(acc) + ',' + 'NMI:' + str(NMI))
 
             RR_acc = np.append(RR_acc, acc)
             RR_nmi = np.append(RR_nmi, NMI)
-            RR_label_size = np.append(RR_label_size, len(set(RR['Ur_max_idx'].tolist())))
-            RR_label_size_col = np.append(RR_label_size_col, len(set(RR['Uc_max_idx'].tolist())))
-
-            acc_AE_Kmeans = np.append(acc_AE_Kmeans, acc_kmeans)
-            nmi_AE_Kmeans = np.append(nmi_AE_Kmeans , NMI_kmeans)
-
-            pred_label_list.append(pred_label)
-            pred_label_col_list.append(pred_label_col)
-
-        '''
-        # GMM training
-        for k in range(2000):
-            train_step_gmm.run(feed_dict={keep_prob: 0.5})
-            # elif k < 20000:
-            #     train_step_1.run(feed_dict={keep_prob: 0.5})
-            # else:
-            #     train_step_2.run(feed_dict={keep_prob: 0.5})
-            if (k+1) % 10 == 0:
-                train_obj = obj_gmm.eval(feed_dict={keep_prob: 1.0, train_x_v: train_norm_x})
-                print("Epoch %d at gmm: objective %g" % (k + 1, train_obj))
-        '''
-
-        coord.request_stop()
-        coord.join(threads)
-
-        ## final predicted labels of instances and features       
-        #pred_label = np.argmax(RR['p_z'], 1) # vertor in row
-        #pred_label_col = np.argmax(RR['p_z_col'], 1)
-
-        pred_label_kmeans_final = KMeans(n_clusters=self.nclu_row, random_state=0).fit(RR['train_z']).labels_
-        set_pre_kmeans_final = set(pred_label_kmeans_final.tolist())
-        # print('Kmeans predicts label on AE')
-        # print(pred_label_kmeans_final)
-        # print('Kmeans predicts label set on AE')
-        # print(set_pre_kmeans_final)
-        true_label = train_y # numpy
-        Kmeans_acc, Kmeans_nmi = self.eval(true_label, pred_label_kmeans_final)
-        # print("Kmeans-Acc %g: Kmeans-NMI %g" % (Kmeans_acc , Kmeans_nmi))
-
-#         sio.savemat('.../result.mat', \
-# {'RR_obj_oa':RR_obj_oa, 'RR_obj_oa_row':RR_obj_oa_row, 'RR_obj_oa_col':RR_obj_oa_col,'RR_obj_cross':RR_obj_cross,\
-# 'RR_error_oa':RR_error_oa, 'RR_train_l2_reg':RR_train_l2_reg, 'RR_loss':RR_loss, 'RR_pen_dev':RR_pen_dev,\
-# 'RR_error_oa_col':RR_error_oa_col, 'RR_train_l2_reg_col':RR_train_l2_reg_col, 'RR_loss_col':RR_loss_col, 'RR_pen_dev_col':RR_pen_dev_col,\
-#  'RR_acc':RR_acc, 'RR_nmi':RR_nmi, 'RR_label_size':RR_label_size, 'RR_label_size_col':RR_label_size_col,\
-# 'RR_MI_org':RR_MI_org, 'RR_MI_red':RR_MI_red, 'acc_AE_Kmeans':acc_AE_Kmeans, 'nmi_AE_Kmeans':nmi_AE_Kmeans, 'pred_label_list':pred_label_list, 'pred_label_col_list':pred_label_col_list})
-
-#         prd_lab     = pred_label_list[-1]
-#         prd_lab_col = pred_label_col_list[-1]
-#         sio.savemat('.../DeepCC'+'_'+'coil20'+'_'+'prdlabel.mat', {'prd_lab':prd_lab, 'prd_lab_col':prd_lab_col})
+            
 
         return RR_acc, RR_nmi
 
