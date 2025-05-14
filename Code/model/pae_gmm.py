@@ -18,8 +18,8 @@ def get_key(item):
 class PaeGmm(torch.nn.Module):
     def __init__(self, nclu_row, nclu_col, ae_config, ae_col_config, gmm_config, num_dropout, device):
         super(PaeGmm,self).__init__()
-        self.autoencoder = ae.PretrainAutoencoder(ae_config, num_dropout, device)
-        self.autoencoder_col = ae.PretrainAutoencoder(ae_col_config, num_dropout, device)
+        self.autoencoder = ae.PretrainAutoencoder(ae_config, num_dropout)
+        self.autoencoder_col = ae.PretrainAutoencoder(ae_col_config, num_dropout)
         self.e_net = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
         self.e_net_col = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
         self.gmm_optimizer = torch.optim.Adam(self.e_net.wi + self.e_net.bi + self.e_net_col.wi + self.e_net_col.bi,1e-4)
@@ -185,27 +185,8 @@ class PaeGmm(torch.nn.Module):
         RR_nmi = []
     
         # Pretraining
-        self.autoencoder.train()
-        for i in range(len(train_var_list)):
-            for j in range(pretrain_epochs) :
-                train_z, train_error, train_var_list, train_l2_reg, train_reg = self.autoencoder.run(train_x_v, keep_prob)
-                obj_oa_pretrain = train_error[i] * 5e0 + train_reg[i] * 1e0
-                train_step_i = torch.optim.Adam(train_var_list[i],1e-4)
-                train_step_i.zero_grad()
-                obj_oa_pretrain.requires_grad = True
-                obj_oa_pretrain.backward()
-                train_step_i.step()
-
-
-        for i in range(len(train_var_list_col)):
-            for j in range(pretrain_epochs) :
-                train_z_col, train_error_col, train_var_list_col, train_l2_reg_col, train_reg_col = self.autoencoder_col.run(train_x_v_col, keep_prob)
-                obj_oa_col_pretrain = train_error_col[i] * 5e0 + train_reg_col[i] * 1e0
-                train_col_step_i = torch.optim.Adam(train_var_list_col[i],1e-4)
-                train_col_step_i.zero_grad()
-                obj_oa_col_pretrain.requires_grad = True
-                obj_oa_col_pretrain.backward()
-                train_col_step_i.step()
+        train_z, train_error, train_l2_reg = self.autoencoder.fit(train_x_v,pretrain_epochs,keep_prob) 
+        train_z_col, train_error_col, train_l2_reg_col = self.autoencoder_col.fit(train_x_v_col,pretrain_epochs,keep_prob) 
 
         # Joint fine training
         error_oa = 0
@@ -219,8 +200,8 @@ class PaeGmm(torch.nn.Module):
             error_oa_col = error_oa_col + error_col_k
 
         # GMM Membership estimation
-        for i in range(train_epochs):
-            self.train
+        for epoch in range(train_epochs):
+            self.train()
 
             loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net.run(train_z, keep_prob)
 
@@ -247,6 +228,7 @@ class PaeGmm(torch.nn.Module):
 
             self.scheduler.step()
 
+            if epoch % 20 == 0 : print(f'epoch {epoch}, loss : {obj_oa}')
             # calculate accuracy and NMI
             pred_label = np.argmax(p_z.cpu(), 1) # vertor in row
             pred_label_col = np.argmax(p_z_col.cpu(), 1)
