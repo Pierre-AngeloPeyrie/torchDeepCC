@@ -186,7 +186,7 @@ class PaeGmm(torch.nn.Module):
     
         # Pretraining
         self.autoencoder.train()
-        for i in range(len(train_var_list)):
+        for i in range(len(self.autoencoder.num_dim) - 1):
             for j in range(pretrain_epochs) :
                 train_z, train_error, train_var_list, train_l2_reg, train_reg = self.autoencoder.run(train_x_v, keep_prob)
                 obj_oa_pretrain = train_error[i] * 5e0 + train_reg[i] * 1e0
@@ -196,8 +196,8 @@ class PaeGmm(torch.nn.Module):
                 obj_oa_pretrain.backward()
                 train_step_i.step()
 
-
-        for i in range(len(train_var_list_col)):
+        self.autoencoder_col.train()
+        for i in range(len(self.autoencoder_col.num_dim) - 1):
             for j in range(pretrain_epochs) :
                 train_z_col, train_error_col, train_var_list_col, train_l2_reg_col, train_reg_col = self.autoencoder_col.run(train_x_v_col, keep_prob)
                 obj_oa_col_pretrain = train_error_col[i] * 5e0 + train_reg_col[i] * 1e0
@@ -220,7 +220,7 @@ class PaeGmm(torch.nn.Module):
 
         # GMM Membership estimation
         for i in range(train_epochs):
-            self.train
+            self.train()
 
             loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net.run(train_z, keep_prob)
 
