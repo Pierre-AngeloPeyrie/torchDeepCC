@@ -70,7 +70,7 @@ class PretrainAutoencoder(torch.nn.Module):
 
         return xo, error, l2_reg, reg
     
-    def fit(self, x, epochs, keep_prob):
+    def fit(self, epochs, x, keep_prob):
         for i in range(epochs) :
             self.train()
             train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
@@ -79,7 +79,8 @@ class PretrainAutoencoder(torch.nn.Module):
                 loss = train_error[j] * 5e0 + train_reg[j] * 1e0
                 loss.backward(retain_graph = True)
             self.optimizer.step()
-            if i % 20 == 0 : print(f'loss pretrain row AE round {i} : {train_error[-1]}')
+            if i % 20 == 0 : print(f'loss pretrain AE epoch {i} : {train_error[-1]}')
+        train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
         return train_z, train_error, train_l2_reg
 
     def test(self, x):
@@ -172,4 +173,3 @@ class PretrainAutoencoder(torch.nn.Module):
 
 if __name__ == '__main__':
     print('test autoencoder')
-

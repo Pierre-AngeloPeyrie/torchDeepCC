@@ -22,7 +22,7 @@ class PaeGmm(torch.nn.Module):
         self.autoencoder_col = ae.PretrainAutoencoder(ae_col_config, num_dropout)
         self.e_net = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
         self.e_net_col = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
-        self.gmm_optimizer = torch.optim.Adam(self.e_net.wi + self.e_net.bi + self.e_net_col.wi + self.e_net_col.bi,1e-4)
+        self.gmm_optimizer = torch.optim.Adam(self.parameters(),1e-4)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.gmm_optimizer,1500,0.1)
         self.device = device
 
@@ -185,8 +185,8 @@ class PaeGmm(torch.nn.Module):
         RR_nmi = []
     
         # Pretraining
-        train_z, train_error, train_l2_reg = self.autoencoder.fit(train_x_v,pretrain_epochs,keep_prob) 
-        train_z_col, train_error_col, train_l2_reg_col = self.autoencoder_col.fit(train_x_v_col,pretrain_epochs,keep_prob) 
+        train_z, train_error, train_l2_reg = self.autoencoder.fit(pretrain_epochs, train_x_v, keep_prob) 
+        train_z_col, train_error_col, train_l2_reg_col = self.autoencoder_col.fit(pretrain_epochs, train_x_v_col, keep_prob) 
 
         # Joint fine training
         error_oa = 0
@@ -202,10 +202,10 @@ class PaeGmm(torch.nn.Module):
         # GMM Membership estimation
         for epoch in range(train_epochs):
             self.train()
+            
+            loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net(train_z, keep_prob)
 
-            loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net.run(train_z, keep_prob)
-
-            loss_col, pen_dev_col, likelihood_col, p_z_col, x_t_col, p_t_col, z_p_col, z_t_col, mixture_mean_col, mixture_dev_col, mixture_cov_col, mixture_dev_det_col = self.e_net_col.run(train_z_col, keep_prob)
+            loss_col, pen_dev_col, likelihood_col, p_z_col, x_t_col, p_t_col, z_p_col, z_t_col, mixture_mean_col, mixture_dev_col, mixture_cov_col, mixture_dev_det_col = self.e_net_col(train_z_col, keep_prob)
 
             # Train step
 
@@ -219,19 +219,18 @@ class PaeGmm(torch.nn.Module):
             obj_oa_row =     error_oa * 2e-2  +     train_l2_reg * 2e-2 +     loss * 1e-1 +     pen_dev
             obj_oa_col = error_oa_col * 2e-2  + train_l2_reg_col * 2e-2 + loss_col * 1e-1 + pen_dev_col
             obj_cross  = self.MI_loss(p_z, p_z_col)
-            obj_oa     = obj_oa_row + obj_oa_col + obj_cross * 1e5
+            combined_loss = obj_oa_row + obj_oa_col + obj_cross * 1e5
 
             self.gmm_optimizer.zero_grad()
-            obj_oa.requires_grad = True
-            obj_oa.backward()
+            combined_loss.backward()
             self.gmm_optimizer.step()
 
             self.scheduler.step()
 
-            if epoch % 20 == 0 : print(f'epoch {epoch}, loss : {obj_oa}')
+            if epoch % 20 == 0 : print(f'epoch {epoch}, loss : {combined_loss}')
             # calculate accuracy and NMI
-            pred_label = np.argmax(p_z.cpu(), 1) # vertor in row
-            pred_label_col = np.argmax(p_z_col.cpu(), 1)
+            pred_label = np.argmax(p_z.cpu().detach().numpy(), 1) # vertor in row
+            pred_label_col = np.argmax(p_z_col.cpu().detach().numpy(), 1)
 
             true_label = train_y # numpy
             acc, NMI = self.eval(true_label, pred_label)

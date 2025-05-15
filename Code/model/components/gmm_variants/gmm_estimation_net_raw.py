@@ -1,5 +1,5 @@
 import model.components.stat_lib as slib
-import model.components.param_init as pini
+from model.components.param_init import init_lin_layer
 
 import torch
 import torch.nn as nn
@@ -14,30 +14,29 @@ class GMMEstimationNetRaw(nn.Module):
         self.dmm_config = config
         self.num_mixture = self.dmm_config[0][0]
         self.gmm_layer = self.dmm_config[0][1]
-        # Layer 1
-        self.wi = []
-        self.bi = []
+
+        self.layers = torch.nn.ModuleList([])
+        
         for i in range(1, len(self.dmm_config) - 1):
-            w = pini.weight_variable([self.dmm_config[i], self.dmm_config[i+1]], device)
-            b = pini.bias_variable([self.dmm_config[i+1]], device)
-            self.wi.append(w)
-            self.bi.append(b)
+            self.layers.append(init_lin_layer(self.dmm_config[i], self.dmm_config[i+1]))
         # Mixture modeling
         self.gmm_config = [self.num_mixture, self.dmm_config[self.gmm_layer], self.dmm_config[self.gmm_layer]]
         self.gmm = slib.GaussianMixtureModeling(self.gmm_config)
+        self.optimizer = torch.optim.Adam(self.parameters(),1e-4)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,1500,0.1)
 
-    def run(self, x, keep_prob):
+    def forward(self, x, keep_prob):
         # Mixture estimation network
         z = [x]
-        for i in range(0, len(self.wi)):
-            if i == len(self.wi) - 1:
+        for i in range(0, len(self.layers)):
+            if i == len(self.layers) - 1:
                 zi = F.dropout(z[i], p=1 - (keep_prob))
             else:
                 zi = z[i]
-            if i < len(self.wi) - 1:
-                zj = F.tanh(torch.matmul(zi, self.wi[i]) + self.bi[i]) # tanh, softsign, sigmoid, softplus
+            if i < len(self.layers) - 1:
+                zj = F.tanh(self.layers[i](zi)) # tanh, softsign, sigmoid, softplus
             else:
-                zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i],dim=1)
+                zj = F.softmax(self.layers[i](zi),dim=1)
                 # f = torch.matmul(zi, self.wi[i]) + self.bi[i]
             z.append(zj)
         
@@ -63,13 +62,12 @@ class GMMEstimationNetRaw(nn.Module):
         #return loss, pen_dev, likelihood, p
         return loss, pen_dev, likelihood, pstr, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det
 
-
     def model(self, x):
         # Mixture estimation network
         z = [x]
-        for i in range(0, len(self.wi)):
+        for i in range(0, len(self.layers)):
             zi = z[i]
-            if i < len(self.wi) - 1:
+            if i < len(self.layers) - 1:
                 zj = F.tanh(torch.matmul(zi, self.wi[i]) + self.bi[i])
             else:
                 zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i],dim=1)
@@ -83,9 +81,9 @@ class GMMEstimationNetRaw(nn.Module):
     def test(self, x, phi, mixture_mean, mixture_dev, mixture_cov):
         # Mixture estimation network
         z = [x]
-        for i in range(0, len(self.wi)):
+        for i in range(0, len(self.layers)):
             zi = z[i]
-            if i < len(self.wi) - 1:
+            if i < len(self.layers) - 1:
                 zj = F.tanh(torch.matmul(zi, self.wi[i]) + self.bi[i])
             else:
                 zj = F.softmax(torch.matmul(zi, self.wi[i]) + self.bi[i],dim=1)
