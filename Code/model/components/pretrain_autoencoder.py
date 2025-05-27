@@ -75,9 +75,10 @@ class PretrainAutoencoder(torch.nn.Module):
             self.train()
             train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
             self.optimizer.zero_grad()
+            loss = 0
             for j in range(len(train_error) - 1):
-                loss = train_error[j] * 5e0 + train_reg[j] * 1e0
-                loss.backward(retain_graph = True)
+                loss += train_error[j] * 5e0 + train_reg[j] * 1e0
+            loss.backward()
             self.optimizer.step()
             if i % 20 == 0 : print(f'loss pretrain AE epoch {i} : {train_error[-1]}')
         train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)

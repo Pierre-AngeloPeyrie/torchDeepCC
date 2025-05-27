@@ -9,7 +9,7 @@ import scipy.io as sio
 import model.components.gmm_variants.gmm_estimation_net_raw as dgmmb_multi
 import model.components.pretrain_autoencoder as ae
 
-torch.autograd.set_detect_anomaly(True)
+torch.autograd.set_detect_anomaly(False)
 
 
 def get_key(item):
@@ -22,7 +22,7 @@ class PaeGmm(torch.nn.Module):
         self.autoencoder_col = ae.PretrainAutoencoder(ae_col_config, num_dropout)
         self.e_net = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
         self.e_net_col = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
-        self.gmm_optimizer = torch.optim.Adam(self.parameters(),1e-4)
+        self.gmm_optimizer = torch.optim.Adam(self.parameters(),1e-3)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.gmm_optimizer,1500,0.1)
         self.device = device
 
@@ -147,8 +147,7 @@ class PaeGmm(torch.nn.Module):
         
         #loss = torch.abs((1 - MI_red/MI_org)*(MI_org - MI_red)) # alternative calculation way
         loss = torch.abs(1 - MI_red/MI_org)
-        loss =torch.log(1+loss)
-
+        loss = torch.log(1+loss)
 
         self.T_pro_org = T_pro_org
         self.sum_T_pro_org = torch.sum(T_pro_org)
@@ -181,8 +180,7 @@ class PaeGmm(torch.nn.Module):
         train_x_v_col = torch.from_numpy(self.gaussian_normalization(train_x_col)).to(torch.float32).to(self.device)
         keep_prob = 1.0 
 
-        RR_acc = []
-        RR_nmi = []
+        measures = {'acc' : [], 'nmi' : [] , 'loss' : []}
     
         # Pretraining
         train_z, train_error, train_l2_reg = self.autoencoder.fit(pretrain_epochs, train_x_v, keep_prob) 
@@ -202,10 +200,10 @@ class PaeGmm(torch.nn.Module):
         # GMM Membership estimation
         for epoch in range(train_epochs):
             self.train()
-            
-            loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net(train_z, keep_prob)
 
-            loss_col, pen_dev_col, likelihood_col, p_z_col, x_t_col, p_t_col, z_p_col, z_t_col, mixture_mean_col, mixture_dev_col, mixture_cov_col, mixture_dev_det_col = self.e_net_col(train_z_col, keep_prob)
+            loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net(train_z.detach(), keep_prob)
+
+            loss_col, pen_dev_col, likelihood_col, p_z_col, x_t_col, p_t_col, z_p_col, z_t_col, mixture_mean_col, mixture_dev_col, mixture_cov_col, mixture_dev_det_col = self.e_net_col(train_z_col.detach(), keep_prob)
 
             # Train step
 
@@ -216,8 +214,8 @@ class PaeGmm(torch.nn.Module):
             # Para set for h (last representation) and Softmax(h)
             # obj_oa_row =     error_oa * 5e1 +     train_l2_reg * 1e1 +     loss * 5e0 +     pen_dev * 5e1
 
-            obj_oa_row =     error_oa * 2e-2  +     train_l2_reg * 2e-2 +     loss * 1e-1 +     pen_dev
-            obj_oa_col = error_oa_col * 2e-2  + train_l2_reg_col * 2e-2 + loss_col * 1e-1 + pen_dev_col
+            obj_oa_row =     error_oa.detach() * 2e-2  +     train_l2_reg.detach() * 2e-2 +     loss * 1e-1 +     pen_dev
+            obj_oa_col = error_oa_col.detach() * 2e-2  + train_l2_reg_col.detach() * 2e-2 + loss_col * 1e-1 + pen_dev_col
             obj_cross  = self.MI_loss(p_z, p_z_col)
             combined_loss = obj_oa_row + obj_oa_col + obj_cross * 1e5
 
@@ -230,15 +228,16 @@ class PaeGmm(torch.nn.Module):
             if epoch % 20 == 0 : print(f'epoch {epoch}, loss : {combined_loss}')
             # calculate accuracy and NMI
             pred_label = np.argmax(p_z.cpu().detach().numpy(), 1) # vertor in row
-            pred_label_col = np.argmax(p_z_col.cpu().detach().numpy(), 1)
+            # pred_label_col = np.argmax(p_z_col.cpu().detach().numpy(), 1)
 
             true_label = train_y # numpy
-            acc, NMI = self.eval(true_label, pred_label)
+            acc, nmi = self.eval(true_label, pred_label)
             #print('acc:' + str(acc) + ',' + 'NMI:' + str(NMI))
 
-            RR_acc = np.append(RR_acc, acc)
-            RR_nmi = np.append(RR_nmi, NMI)
-            
-
-        return RR_acc, RR_nmi
+            measures['acc'].append(acc) 
+            measures['nmi'].append(nmi) 
+            measures['loss'].append(combined_loss.item()) 
+        return measures
+        
+    
 

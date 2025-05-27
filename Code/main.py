@@ -29,7 +29,8 @@ if __name__ == '__main__':
     print(f"Device : {dev}")
     device = torch.device(dev)  
     
-    filename   = './Data/WebKB_texas.mat'
+    #IMDb_movies_actors, IMDb_movies_keywords,  WebKB4,  WebKB_cornell,  WebKB_texas, WebKB_washington,  WebKB_wisconsin,  Yale_32x32,  cora, synthetic/synthetic_data
+    filename   = './Data/cora.mat'
 
     #load data
     data_file = sio.loadmat(filename)
@@ -47,13 +48,13 @@ if __name__ == '__main__':
 
     gmm_config = [[num_clus_r, 5], 40, 160, 80, 40, num_clus_r]
 
-    epochs = 20
-    epochs_pretrain = 20
+    epochs = 1000
+    epochs_pretrain = 100
     set_seed()
 
     machine = PaeGmm(num_clus_r, num_clus_c, ae_config, ae_col_config, gmm_config, 0, device).to(device)
 
-    acc, nmi = machine.run(input_data, ground_truth, epochs, epochs_pretrain)
+    measures = machine.run(input_data, ground_truth, epochs, epochs_pretrain)
 
-    print(f"Acc : {acc[-1]}")
-    print(f"NMI : {nmi[-1]}")
+    print(f"Acc : {measures['acc'][-1]}")
+    print(f"NMI : {measures['nmi'][-1]}")

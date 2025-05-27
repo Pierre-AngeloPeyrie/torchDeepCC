@@ -238,13 +238,22 @@ class GaussianMixtureModeling:
         t2 = ((2 * math.pi) ** (0.5 * self.num_dim)) * mixture_dev_det
         
         # Likelihood
+        mask = t2 != 0
         tmp = phi * (t1 / t2)
         likelihood = torch.sum(tmp, dim=1)
         pen_dev = torch.sum(1.0 / mixture_cov)
-        posterior_z = torch.sum(tmp, dim=1, keepdims=True)
+        posterior_z = torch.sum(tmp, dim=1, keepdim=True)
+        # posterior_z[posterior_z == 0] = 1
+        # pmask = posterior_z != 0
+        # print('zeros ?', (posterior_z == 0).any() )
+        # print(tmp.shape,posterior_z.shape,pmask.shape,posterior_z[pmask].shape, posterior_z[pmask].unsqueeze(1).shape)
         posterior = tmp / posterior_z
+        # print('is nan ?', (~tmp.sum().isfinite()).any().item())
+
         kl_divergence = torch.sum(p * torch.log(p / (posterior + 1e-12)), dim=1)
-        energy = torch.mean(-torch.log(likelihood) + kl_divergence)
+        energy = torch.mean(-torch.log(likelihood + 1e-12) + kl_divergence)
+        print('is nan ?',x.isnan().any())
+        # print('is nan ?', (~(-torch.log(likelihood)).isfinite()).any().item(), (~kl_divergence.isfinite()).any().item())
         #energy = torch.mean(-torch.log(likelihood))
         return energy, posterior, pen_dev, likelihood, phi, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det
 

@@ -22,8 +22,7 @@ class GMMEstimationNetRaw(nn.Module):
         # Mixture modeling
         self.gmm_config = [self.num_mixture, self.dmm_config[self.gmm_layer], self.dmm_config[self.gmm_layer]]
         self.gmm = slib.GaussianMixtureModeling(self.gmm_config)
-        self.optimizer = torch.optim.Adam(self.parameters(),1e-4)
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,1500,0.1)
+
 
     def forward(self, x, keep_prob):
         # Mixture estimation network
