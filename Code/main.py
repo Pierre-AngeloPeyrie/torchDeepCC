@@ -30,7 +30,7 @@ if __name__ == '__main__':
     device = torch.device(dev)  
     
     #IMDb_movies_actors, IMDb_movies_keywords,  WebKB4,  WebKB_cornell,  WebKB_texas, WebKB_washington,  WebKB_wisconsin,  Yale_32x32,  cora, synthetic/synthetic_data
-    filename   = './Data/cora.mat'
+    filename   = './Data/IMDb_movies_actors.mat'
 
     #load data
     data_file = sio.loadmat(filename)
@@ -48,7 +48,7 @@ if __name__ == '__main__':
 
     gmm_config = [[num_clus_r, 5], 40, 160, 80, 40, num_clus_r]
 
-    epochs = 1000
+    epochs = 100
     epochs_pretrain = 100
     set_seed()
 

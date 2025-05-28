@@ -9,7 +9,7 @@ import scipy.io as sio
 import model.components.gmm_variants.gmm_estimation_net_raw as dgmmb_multi
 import model.components.pretrain_autoencoder as ae
 
-torch.autograd.set_detect_anomaly(False)
+torch.autograd.set_detect_anomaly(True)
 
 
 def get_key(item):
@@ -22,7 +22,7 @@ class PaeGmm(torch.nn.Module):
         self.autoencoder_col = ae.PretrainAutoencoder(ae_col_config, num_dropout)
         self.e_net = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
         self.e_net_col = dgmmb_multi.GMMEstimationNetRaw(gmm_config, device)
-        self.gmm_optimizer = torch.optim.Adam(self.parameters(),1e-3)
+        self.gmm_optimizer = torch.optim.Adam(self.parameters(),1e-4)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.gmm_optimizer,1500,0.1)
         self.device = device
 
@@ -197,9 +197,13 @@ class PaeGmm(torch.nn.Module):
         for error_col_k in train_error_col:
             error_oa_col = error_oa_col + error_col_k
 
+        ref = train_z_col[0]/train_z_col[0].norm()
+        uniformity = torch.mean(torch.Tensor([ref.dot(train_z_col[i]/train_z_col[i].norm()) for i in range(train_z_col.shape[0])]))
+        print(uniformity)
         # GMM Membership estimation
         for epoch in range(train_epochs):
             self.train()
+
 
             loss, pen_dev, likelihood, p_z, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det = self.e_net(train_z.detach(), keep_prob)
 
@@ -220,6 +224,7 @@ class PaeGmm(torch.nn.Module):
             combined_loss = obj_oa_row + obj_oa_col + obj_cross * 1e5
 
             self.gmm_optimizer.zero_grad()
+            print('ciao')
             combined_loss.backward()
             self.gmm_optimizer.step()
 

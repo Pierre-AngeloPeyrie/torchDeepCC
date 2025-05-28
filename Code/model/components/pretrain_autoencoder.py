@@ -20,7 +20,7 @@ class PretrainAutoencoder(torch.nn.Module):
             j = len(self.num_dim)-i
             self.layers.append(init_lin_layer(self.num_dim[j], self.num_dim[j-1]))
 
-        self.optimizer = torch.optim.Adam(self.parameters(),1e-4)
+        self.optimizer = torch.optim.Adam(self.parameters(),1e-3)
         
     def forward(self, x, keep_prob):
         vision_coef = 1.0
@@ -71,19 +71,27 @@ class PretrainAutoencoder(torch.nn.Module):
         return xo, error, l2_reg, reg
     
     def fit(self, epochs, x, keep_prob):
-        for i in range(epochs) :
-            self.train()
-            train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
-            self.optimizer.zero_grad()
-            loss = 0
-            for j in range(len(train_error) - 1):
-                loss += train_error[j] * 5e0 + train_reg[j] * 1e0
-            loss.backward()
-            self.optimizer.step()
-            if i % 20 == 0 : print(f'loss pretrain AE epoch {i} : {train_error[-1]}')
+        for i in range(int(len(self.layers)/2)):
+            for j in range(epochs) :
+                self.train()
+                train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
+                loss = train_error[i] * 5e0 + train_reg[i] * 1e0
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                if j % 20 == 0 : print(f'loss pretrain layer {i} AE epoch {j} : {train_error[-1]}')
         train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
         return train_z, train_error, train_l2_reg
-
+    # def fit(self, epochs, x, keep_prob):
+    #     for i in range(epochs) :
+    #         self.train()
+    #         train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
+    #         loss = train_error[-1] * 5e0 + train_l2_reg * 1e0
+    #         self.optimizer.zero_grad()
+    #         loss.backward()
+    #         self.optimizer.step()
+    #         if i % 20 == 0 : print(f'loss pretrain AE epoch {i} : {train_error[-1]}')
+    #     return train_z, train_error, train_l2_reg
     def test(self, x):
         # Encode
         zi = x
