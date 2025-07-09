@@ -251,8 +251,8 @@ class GaussianMixtureModeling:
         # print('is nan ?', (~tmp.sum().isfinite()).any().item())
 
         kl_divergence = torch.sum(p * torch.log(p / (posterior + 1e-12)), dim=1)
-        energy = torch.mean(-torch.log(likelihood + 1e-12) + kl_divergence)
-        print('is nan ?',x.isnan().any())
+        energy = torch.mean(-torch.log(likelihood) + kl_divergence)
+        # print('is nan ?',t1.isnan().any())
         # print('is nan ?', (~(-torch.log(likelihood)).isfinite()).any().item(), (~kl_divergence.isfinite()).any().item())
         #energy = torch.mean(-torch.log(likelihood))
         return energy, posterior, pen_dev, likelihood, phi, x_t, p_t, z_p, z_t, mixture_mean, mixture_dev, mixture_cov, mixture_dev_det

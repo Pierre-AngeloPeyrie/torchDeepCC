@@ -9,7 +9,7 @@ import scipy.io as sio
 import model.components.gmm_variants.gmm_estimation_net_raw as dgmmb_multi
 import model.components.pretrain_autoencoder as ae
 
-torch.autograd.set_detect_anomaly(False)
+torch.autograd.set_detect_anomaly(True)
 
 
 def get_key(item):
@@ -183,19 +183,17 @@ class PaeGmm(torch.nn.Module):
         measures = {'acc' : [], 'nmi' : [] , 'loss' : []}
     
         # Pretraining
-        train_z, train_error, train_l2_reg = self.autoencoder.fit(pretrain_epochs, train_x_v, keep_prob) 
-        train_z_col, train_error_col, train_l2_reg_col = self.autoencoder_col.fit(pretrain_epochs, train_x_v_col, keep_prob) 
+        train_z = self.autoencoder.fit(pretrain_epochs, train_x_v, keep_prob) 
+        train_z_col = self.autoencoder_col.fit(pretrain_epochs, train_x_v_col, keep_prob) 
 
-        # Joint fine training
-        error_oa = 0
-        for error_k in train_error:
-            error_oa = error_oa + error_k
-        # error_oa = train_error[len(train_error) - 1]
-        # reconstruction_error = train_error[len(train_error) - 1]
+        # ref = train_z_col[0]/train_z_col[0].norm()
+        # uniformity = torch.mean(torch.Tensor([ref.dot(train_z_col[i]/train_z_col[i].norm()) for i in range(train_z_col.shape[0])]))
+        # print(np.unique(train_x,axis=0).__len__())
+        # print(np.unique(self.gaussian_normalization(train_x),axis=0).__len__())
+        # print(np.unique(train_z_col.detach().cpu(),axis=0).__len__())
 
-        error_oa_col = 0
-        for error_col_k in train_error_col:
-            error_oa_col = error_oa_col + error_col_k
+        # print(uniformity)
+        # exit()
 
         # GMM Membership estimation
         for epoch in range(train_epochs):
@@ -214,8 +212,8 @@ class PaeGmm(torch.nn.Module):
             # Para set for h (last representation) and Softmax(h)
             # obj_oa_row =     error_oa * 5e1 +     train_l2_reg * 1e1 +     loss * 5e0 +     pen_dev * 5e1
 
-            obj_oa_row =     error_oa.detach() * 2e-2  +     train_l2_reg.detach() * 2e-2 +     loss * 1e-1 +     pen_dev
-            obj_oa_col = error_oa_col.detach() * 2e-2  + train_l2_reg_col.detach() * 2e-2 + loss_col * 1e-1 + pen_dev_col
+            obj_oa_row = loss * 1e-1 +     pen_dev
+            obj_oa_col = loss_col * 1e-1 + pen_dev_col
             obj_cross  = self.MI_loss(p_z, p_z_col)
             combined_loss = obj_oa_row + obj_oa_col + obj_cross * 1e5
 

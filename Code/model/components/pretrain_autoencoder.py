@@ -7,7 +7,8 @@ from model.components.param_init import init_lin_layer
 class PretrainAutoencoder(torch.nn.Module):
     def __init__(self, config, num_drop_out):
         super(PretrainAutoencoder,self).__init__()
-        self.num_dim = config
+        self.num_dim = torch.linspace(config[0], config[-1], 2 + 1, dtype = int)
+        print(self.num_dim)
         self.code_layer = len(config)
         self.num_dropout_layer = num_drop_out
         # Parameters in layers
@@ -19,70 +20,31 @@ class PretrainAutoencoder(torch.nn.Module):
         for i in range(1, len(self.num_dim)):
             j = len(self.num_dim)-i
             self.layers.append(init_lin_layer(self.num_dim[j], self.num_dim[j-1]))
-
-        self.optimizer = torch.optim.Adam(self.parameters(),1e-4)
+        self.loss_fn = torch.nn.MSELoss()
+        self.activation = torch.nn.Tanh()
+        self.optimizer = torch.optim.Adam(self.parameters(),1e-3, weight_decay=1e-2)
         
-    def forward(self, x, keep_prob):
-        vision_coef = 1.0
-        error = []
-        reg = []
-        l2_reg = torch.tensor(0)
-
-        # Encode
-        zi = x
-        for i in range(int(len(self.layers)/2)):
-            if i < len(self.layers) / 2 - 1:
-                zj = F.tanh(self.layers[i](zi))
-            else:
-                zj = self.layers[i](zi)
-            if i < self.num_dropout_layer:
-                zj = F.dropout(zj, p = 1 - (keep_prob))
-            ni = len(self.layers) - i - 1
-            if i == 0:
-                z_r = self.layers[len(self.layers) - 1](zj)
-            else:
-                z_r = F.tanh(self.layers[ni](zj))
-            error_l = torch.mean(torch.linalg.norm(zi - z_r, ord = 2, dim=1, keepdims=True))
-            error.append(error_l * vision_coef)
-            zi = zj
-            reg.append(self.layers[i].weight.square().sum()/2 + self.layers[ni].weight.square().sum()/2)
-            l2_reg = l2_reg + self.layers[i].weight.square().sum()/2
-        zc = zi
+    def forward(self, x, keep_prob,):
+        for i in range(len(self.layers)//2):
+            x = self.activation(self.layers[i](x))
+        embeddings = x
+        for i in range(len(self.layers)//2,len(self.layers) - 1):
+            x = self.activation(self.layers[i](x))
+        x = self.layers[-1](x)
         
-        # Decode
-        for i in range(int(len(self.layers)/2), len(self.layers)):
-            if i < len(self.layers) - 1:
-                zj = F.tanh(self.layers[i](zi))
-                if i >= len(self.layers) - 1 - self.num_dropout_layer:
-                    zj = F.dropout(zj, p = 1 - (keep_prob))
-            else:
-                zj = self.layers[i](zi)
-            l2_reg = l2_reg + self.layers[i].weight.square().sum()/2
-            zi = zj
-        zo = zi
-
-        # Cosine similarity
-        loss = torch.linalg.norm(x - zo, ord=2, dim=1, keepdims=True)
-        
-        xo = torch.concat([zc], 1)
-
-        error.append(torch.mean(loss))
-
-        return xo, error, l2_reg, reg
+        return embeddings, x
     
     def fit(self, epochs, x, keep_prob):
         for i in range(epochs) :
             self.train()
-            train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
+            train_z, output = self(x, keep_prob)
+            loss = self.loss_fn(x, output)
             self.optimizer.zero_grad()
-            loss = 0
-            for j in range(len(train_error) - 1):
-                loss += train_error[j] * 5e0 + train_reg[j] * 1e0
             loss.backward()
             self.optimizer.step()
-            if i % 20 == 0 : print(f'loss pretrain AE epoch {i} : {train_error[-1]}')
-        train_z, train_error, train_l2_reg, train_reg = self(x, keep_prob)
-        return train_z, train_error, train_l2_reg
+            if i % 20 == 0 : print(f'loss pretrain AE epoch {i} : {loss.item()}')
+        # print(f'original : {x} \n output : {output}')
+        return train_z
 
     def test(self, x):
         # Encode
